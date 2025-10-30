@@ -76,37 +76,70 @@ class Telemetry:
     def create(
         cls,
         connection: mavutil.mavfile,
-        args,  # Put your own arguments here
         local_logger: logger.Logger,
-    ):
+    ) -> "tuple[True, Telemetry] | tuple[False, None]":
         """
         Falliable create (instantiation) method to create a Telemetry object.
         """
-        pass  # Create a Telemetry object
+        try:
+            telemetry = cls(cls.__private_key, connection, local_logger)
+            return True, telemetry
+        except (OSError, mavutil.mavlink.MAVError) as exception:
+            local_logger.error(f"Telemetry object creation failed: {exception}")
+            return False, None  # Create a Telemetry object
 
     def __init__(
         self,
         key: object,
-        connection: mavutil.mavfile,
-        args,  # Put your own arguments here
+        connection: mavutil.mavfile,  # Put your own arguments here
         local_logger: logger.Logger,
     ) -> None:
         assert key is Telemetry.__private_key, "Use create() method"
 
         # Do any intializiation here
+        self.connection = connection
+        self.local_logger = local_logger
 
     def run(
         self,
-        args,  # Put your own arguments here
-    ):
+    ) -> TelemetryData:
         """
         Receive LOCAL_POSITION_NED and ATTITUDE messages from the drone,
         combining them together to form a single TelemetryData object.
         """
-        # Read MAVLink message LOCAL_POSITION_NED (32)
-        # Read MAVLink message ATTITUDE (30)
-        # Return the most recent of both, and use the most recent message's timestamp
-        pass
+        start_time = time.time()
+        local_position = None
+        attitude = None
+        while time.time() - start_time < 1:
+            reading = self.connection.recv_match(blocking=False)
+            if reading:
+                self.local_logger.info(f"Received Telemetry Data: {reading.get_type()}")
+            # Read MAVLink message LOCAL_POSITION_NED (32)
+            if reading and reading.get_type() == "LOCAL_POSITION_NED":
+                local_position = reading
+            # Read MAVLink message ATTITUDE (30)
+            elif reading and reading.get_type() == "ATTITUDE":
+                attitude = reading
+            if attitude and local_position:
+                max_time_since_boot = max(local_position.time_boot_ms, attitude.time_boot_ms)
+                # Return the most recent of both, and use the most recent message's timestamp
+                return TelemetryData(
+                    max_time_since_boot,
+                    local_position.x,
+                    local_position.y,
+                    local_position.z,
+                    local_position.vx,
+                    local_position.vy,
+                    local_position.vz,
+                    attitude.roll,
+                    attitude.pitch,
+                    attitude.yaw,
+                    attitude.rollspeed,
+                    attitude.pitchspeed,
+                    attitude.yawspeed,
+                )
+        self.local_logger.error("Telemetry data could not be received from drone.")
+        return None
 
 
 # =================================================================================================
