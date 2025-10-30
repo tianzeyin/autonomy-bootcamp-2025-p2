@@ -18,13 +18,16 @@ from ..common.modules.logger import logger
 # =================================================================================================
 def heartbeat_receiver_worker(
     connection: mavutil.mavfile,
-    args,  # Place your own arguments here
+    report_queue: queue_proxy_wrapper.QueueProxyWrapper,
+    controller: worker_controller.WorkerController,  # Place your own arguments here
     # Add other necessary worker arguments here
 ) -> None:
     """
     Worker process.
 
-    args... describe what the arguments are
+    connection is a channel between drone and heartbeat receiver worker
+    report_queue stores data in queue
+    controller regulates a worker's state
     """
     # =============================================================================================
     #                          ↑ BOOTCAMPERS MODIFY ABOVE THIS COMMENT ↑
@@ -47,8 +50,21 @@ def heartbeat_receiver_worker(
     #                          ↓ BOOTCAMPERS MODIFY BELOW THIS COMMENT ↓
     # =============================================================================================
     # Instantiate class object (heartbeat_receiver.HeartbeatReceiver)
+    result, receiver = heartbeat_receiver.HeartbeatReceiver.create(connection, local_logger)
+    if not result:
+        local_logger.error("Failed to create Heartbeat Receiver Object")
+        return
+
+    local_logger.info("Heartbeat Receiver Created", True)
+
+    assert receiver is not None
 
     # Main loop: do work.
+    while not controller.is_exit_requested():
+        controller.check_pause()
+        receiver.run()
+        report_queue.queue.put(receiver.run())
+        time.sleep(1)
 
 
 # =================================================================================================
