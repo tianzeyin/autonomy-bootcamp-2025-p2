@@ -54,31 +54,45 @@ def start_drone() -> None:
 #                            ↓ BOOTCAMPERS MODIFY BELOW THIS COMMENT ↓
 # =================================================================================================
 def stop(
-    args,  # Add any necessary arguments
+    command_input_queue: queue_proxy_wrapper.QueueProxyWrapper,
+    command_output_queue: queue_proxy_wrapper.QueueProxyWrapper,
+    controller: worker_controller.WorkerController,  # Add any necessary arguments
 ) -> None:
     """
     Stop the workers.
     """
-    pass  # Add logic to stop your worker
+    command_input_queue.fill_and_drain_queue()
+    command_output_queue.fill_and_drain_queue()
+    controller.request_exit()  # Add logic to stop your worker
 
 
 def read_queue(
-    args,  # Add any necessary arguments
+    command_output_queue: queue_proxy_wrapper.QueueProxyWrapper,
+    controller: worker_controller.WorkerController,  # Add any necessary arguments
     main_logger: logger.Logger,
 ) -> None:
     """
     Read and print the output queue.
     """
-    pass  # Add logic to read from your worker's output queue and print it using the logger
+    while not controller.is_exit_requested():
+        if not command_output_queue.queue.empty():
+            main_logger.info(
+                command_output_queue.queue.get()
+            )  # Add logic to read from your worker's output queue and print it using the logger
 
 
 def put_queue(
-    args,  # Add any necessary arguments
+    command_input_queue: queue_proxy_wrapper.QueueProxyWrapper,
+    telemetry_data_list: list[telemetry.TelemetryData],  # Add any necessary arguments
 ) -> None:
     """
     Place mocked inputs into the input queue periodically with period TELEMETRY_PERIOD.
     """
-    pass  # Add logic to place the mocked inputs into your worker's input queue periodically
+    for data in telemetry_data_list:
+        command_input_queue.queue.put(data)
+        time.sleep(
+            TELEMETRY_PERIOD
+        )  # Add logic to place the mocked inputs into your worker's input queue periodically
 
 
 # =================================================================================================
@@ -127,10 +141,14 @@ def main() -> int:
     # =============================================================================================
     # Mock starting a worker, since cannot actually start a new process
     # Create a worker controller for your worker
+    controller = worker_controller.WorkerController()
 
     # Create a multiprocess manager for synchronized queues
+    mp_manager = mp.Manager()
 
     # Create your queues
+    command_input_queue = queue_proxy_wrapper.QueueProxyWrapper(mp_manager)
+    command_output_queue = queue_proxy_wrapper.QueueProxyWrapper(mp_manager)
 
     # Test cases, DO NOT EDIT!
     path = [
@@ -217,16 +235,37 @@ def main() -> int:
     ]
 
     # Just set a timer to stop the worker after a while, since the worker infinite loops
-    threading.Timer(TELEMETRY_PERIOD * len(path), stop, (args,)).start()
+    threading.Timer(
+        TELEMETRY_PERIOD * len(path),
+        stop,
+        (
+            controller,
+            command_input_queue,
+            command_output_queue,
+        ),
+    ).start()
 
     # Put items into input queue
-    threading.Thread(target=put_queue, args=(args,)).start()
+    threading.Thread(
+        target=put_queue,
+        args=(
+            command_input_queue,
+            path,
+        ),
+    ).start()
 
     # Read the main queue (worker outputs)
-    threading.Thread(target=read_queue, args=(args, main_logger)).start()
+    threading.Thread(
+        target=read_queue, args=(command_output_queue, controller, main_logger)
+    ).start()
 
     command_worker.command_worker(
         # Place your own arguments here
+        connection,
+        TARGET,
+        controller,
+        command_input_queue,
+        command_output_queue,
     )
     # =============================================================================================
     #                          ↑ BOOTCAMPERS MODIFY ABOVE THIS COMMENT ↑
